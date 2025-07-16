@@ -1,0 +1,2 @@
+maturin==1.9.1
+-e git+https://github.com/Shimgo2008/rust-asunoyozora@d678cbde944b9b4d414a3e053aaf1d9f2246c3a4#egg=rust_asunoyozora
