@@ -1,0 +1,299 @@
+use std::{ops::{Add, Div, Mul, Sub}};
+
+#[derive(Clone, Copy)]
+pub struct Meter(f64);
+
+#[derive(Clone, Copy)]
+pub struct Kelvin(f64);
+
+#[derive(Clone, Copy)]
+pub struct GPMeter(f64);
+
+#[derive(Clone, Copy)]
+pub struct Pascal(f64);
+#[derive(Clone, Copy)]
+struct Kilogram(f64);
+#[derive(Clone, Copy)]
+struct Second(f64);
+#[derive(Clone, Copy)]
+struct SquareMeter(f64);
+
+#[derive(Clone, Copy)]
+struct Vec2([f64; 2]);
+
+
+impl Meter {
+    pub const fn new(v: f64) -> Self {
+        Self(v)
+    }
+}
+impl Kelvin {
+    pub const fn new(v: f64) -> Self {
+        Self(v)
+    }
+}
+impl GPMeter {
+    pub const fn new(v: f64) -> Self {
+        Self(v)
+    }
+}
+impl Pascal {
+    pub const fn new(v: f64) -> Self {
+        Self(v)
+    }
+}
+impl Vec2 {
+    pub const fn new(v: [f64; 2]) -> Self{
+        Self(v)
+    }
+}
+
+
+impl From<f64> for Second {
+    fn from(value: f64) -> Self {
+        Self(value)
+    }
+}
+
+impl Add for Vec2 {
+    type Output = Self;
+    #[inline(always)]
+    fn add(self, rhs: Self) -> Self::Output {
+        return Vec2([self.0[0] + rhs.0[0], self.0[1] + rhs.0[1]]);
+    }
+}
+impl Sub for Vec2 {
+    type Output = Self;
+    #[inline(always)]
+    fn sub(self, rhs: Self) -> Self::Output {
+        return Vec2([self.0[0] - rhs.0[0], self.0[1] - rhs.0[1]]);
+    }
+}
+impl Mul for Vec2 {
+    type Output = Self;
+    #[inline(always)]
+    fn mul(self, rhs: Self) -> Self::Output {
+        return Vec2([self.0[0] * rhs.0[0], self.0[1] * rhs.0[1]]);
+    }
+}
+impl Mul<f64> for Vec2 {
+    type Output = Self;
+    #[inline(always)]
+    fn mul(self, rhs: f64) -> Self::Output {
+        return Vec2([self.0[0] * rhs, self.0[1] * rhs]);
+    }
+}
+impl Div for Vec2 {
+    type Output = Self;
+    #[inline(always)]
+    fn div(self, rhs: Self) -> Self::Output {
+        return Vec2([self.0[0] / rhs.0[0], self.0[1] / rhs.0[1]]);
+    }
+}
+
+const SA_LENGTH: usize = 8;
+const R: f64 = 8.314462618e+3;      // CODATA
+const G_0: f64 = 9.80665;           // CODATA
+const M_0: f64 = 28.9644;           // CODATA
+const C_D: f64 = 1.0;               // TODO: 難しいから定数 1である妥当性はない
+const R_0: Meter = Meter(6356.766e3);
+const H_I: [GPMeter; SA_LENGTH] = [GPMeter(0.0 * 1000.0), GPMeter(11.0 * 1000.0), GPMeter(20.0 * 1000.0), GPMeter(32.0 * 1000.0), GPMeter(47.0 * 1000.0), GPMeter(51.0 * 1000.0), GPMeter(71.0 * 1000.0), GPMeter(84.852 * 1000.0)];
+const P_B: [Pascal; SA_LENGTH] = [Pascal(101325.0), Pascal(17881.924167776844), Pascal(4451.782721266618), Pascal(835.676386546647), Pascal(125.823085025137), Pascal(75.131157658166), Pascal(2.218089806735), Pascal(0.010142033211)];
+const T_M_B: [Kelvin; SA_LENGTH] = [Kelvin(288.15), Kelvin(216.65), Kelvin(216.65), Kelvin(228.65), Kelvin(270.65), Kelvin(270.65), Kelvin(214.65), Kelvin(186.95)];
+const L_M_B: [f64; SA_LENGTH] = [-6.5 / 1000.0, 0.0 / 1000.0, 1.0 / 1000.0, 2.8 / 1000.0, 0.0 / 1000.0, -2.8 / 1000.0, -2.0 / 1000.0, 0.0 / 1000.0];
+const H_WIDTH_RATE: f64 = 0.24;
+
+pub struct STDATM {
+    h_t: Meter,
+    h_h: Meter,
+    m: Kilogram,
+}
+
+#[allow(non_snake_case)]
+impl STDATM {
+    const fn new(h_t: Meter, h_h: Meter, m: Kilogram) -> Self {
+        Self { h_t, h_h, m }
+    }
+
+    fn analytical_Z(&self, t: Second, base_Z: Meter) -> Meter {
+        let local_k = self.k(base_Z);
+        let analytical_z_val = f64::sqrt((local_k * G_0) / self.m.0) * t.0;
+        if analytical_z_val < 710.47586007394392 {
+            Meter((self.m.0 / local_k) * f64::ln(f64::cosh(analytical_z_val)))
+        } else {
+            Meter((self.m.0 / local_k) * (analytical_z_val - f64::ln(2.0)))
+        }
+    }
+
+    fn a(&self, Z: Meter, v: f64) -> f64 {
+        G_0 - (self.k(Z) * v * v) / self.m.0
+    }
+
+    fn k(&self, Z: Meter) -> f64 {
+        (0.5) * self.A().0 * C_D * self.rho(Z)
+    }
+
+    fn A(&self) -> SquareMeter {
+        SquareMeter((H_WIDTH_RATE * self.h_h.0) * self.h_t.0)
+    }
+
+    /// 最適化後：Z → H, b を1回だけ求める
+    fn rho(&self, Z: Meter) -> f64 {
+        let H = self.Z2H(Z);
+        let b = self.get_b(H);
+        let T = self.T_from_H(H, b);
+        let P = self.P_from_H(H, b);
+        self.rho_from_TP(T, P)
+    }
+
+    /// Hとbが既知のときの温度
+    fn T_from_H(&self, H: GPMeter, b: usize) -> Kelvin {
+        if b == 0 {
+            return T_M_B[0];  // もしくは定数返すなど
+        }
+        let rate = L_M_B[b];
+        let remainder_kilometer = (H.0 - H_I[b - 1].0) / 1000.0;
+        Kelvin(T_M_B[b - 1].0 + remainder_kilometer * rate)
+    }
+
+    /// Hとbが既知のときの気圧
+    fn P_from_H(&self, H: GPMeter, b: usize) -> Pascal {
+        let P_b = P_B[b];
+        if L_M_B[b] == 0.0 {
+            self.P_33b(H, b, P_b)
+        } else {
+            self.P_33a(H, b, P_b)
+        }
+    }
+
+    fn rho_from_TP(&self, T: Kelvin, P: Pascal) -> f64 {
+        (P.0 * M_0) / (R * T.0)
+    }
+
+    /// 最適化後：bを引数で受け取る（P_33a用）
+    fn P_33a(&self, H: GPMeter, b: usize, P_b: Pascal) -> Pascal {
+        if b == 0 {
+            return P_b; // 変化なし or 別の処理にする
+        }
+        let P33a_value = (G_0 * M_0) / (R * L_M_B[b]);
+        Pascal(f64::powf(
+            P_b.0 * ((T_M_B[b].0) / (T_M_B[b].0 + L_M_B[b] * (H.0 - H_I[b - 1].0))),
+            P33a_value,
+        ))
+    }
+
+    /// 最適化後：bを引数で受け取る（P_33b用）
+    fn P_33b(&self, H: GPMeter, b: usize, P_b: Pascal) -> Pascal {
+        if b == 0 {
+            return P_b; // 変化なし or 別の処理にする
+        }
+        let P33b_value = (G_0 * M_0) / (R * T_M_B[b].0);
+        Pascal(P_b.0 * f64::exp(-1.0 * P33b_value * (H.0 - H_I[b - 1].0)))
+    }
+
+    /// b値の取得（Z2Hを省略するため引数はGPMeter）
+    fn get_b(&self, H: GPMeter) -> usize {
+        if H.0 == 0.0 {
+            return 0;
+        }
+        for i in 1..(SA_LENGTH - 1) {
+            if H_I[i].0 <= H.0 && H.0 < H_I[i + 1].0 {
+                return i;
+            }
+        }
+        SA_LENGTH - 1
+    }
+
+    fn Z2H(&self, Z: Meter) -> GPMeter {
+        GPMeter((R_0.0 * Z.0) / (R_0.0 + Z.0))
+    }
+}
+
+fn rk4<F>(f: F,
+    y0: Vec2,
+    t0: Second,
+    t1: Second,
+    dt: Second,
+    stdatm: &STDATM,
+) -> Vec<Vec2>
+where
+    F: Fn(&STDATM, Vec2) -> Vec2
+{
+    let steps = ((t1.0 - t0.0) / dt.0) as usize;
+    let mut results = Vec::with_capacity((steps + 1) / 2);
+    let mut y: Vec2 = y0;
+    results.push(y0);
+
+    for step in 1..steps{
+        let k1: Vec2 = f(stdatm, y);
+        let k2: Vec2 = f(stdatm, y + k1 * (dt.0 / 2.0));
+        let k3: Vec2 = f(stdatm, y + k2 * (dt.0 / 2.0));
+        let k4: Vec2 = f(stdatm, y + k3 * dt.0);
+        y = y + ((k1 + k2 * 2.0 + k3 * 2.0 + k4) * (dt.0 / 6.0));
+        if step % 2 == 0 {
+            results.push(y);
+        }
+    }
+
+    return results;
+}
+
+#[allow(non_snake_case)]
+fn vector_ODE(std: &STDATM, y: Vec2) -> Vec2{
+    let Z = Meter(y.0[0]);
+    let v = y.0[1];
+    let dZ_dt = v;
+    let dv_dt = std.a(Z, v);
+    return Vec2([dZ_dt, dv_dt]);
+}
+
+#[allow(non_snake_case)]
+fn asunoyozora(t_min: Second, t_max: Second, dt: Second, tol: Meter, stdatm: &STDATM) {
+
+    // 解析解の反復計算（解析解の初期高度推定）
+    let mut analytical_Zlist = vec![Meter(0.0)];
+    for _ in 0..10 {
+        let last = analytical_Zlist.last().unwrap();
+        let next = stdatm.analytical_Z(t_max, *last);
+        analytical_Zlist.push(next);
+    }
+
+    // 二分探索の範囲設定
+    let mut low = analytical_Zlist.last().unwrap().0 / 2.0;
+    let mut high = analytical_Zlist.last().unwrap().0 * 2.0;
+
+    while high - low > tol.0 {
+        let mid = (low + high) / 2.0;
+        let y0 = Vec2::new([mid, 0.0]); // 初期位置(mid), 初期速度0
+
+        // rk4関数を使う
+        
+        let y_history: Vec<Vec2> = rk4(vector_ODE, y0, t_min, t_max, dt, &stdatm);
+
+        if y_history[y_history.len() - 1].0[0] > 0.0 {
+            high = mid;
+        } else {
+            low = mid;
+        }
+    }
+
+    println!("推定された初期高度: {:.6} m", (low + high) / 2.0);
+}
+
+
+fn main() {
+    let t_min = Second(0.0);
+    let t_max = Second(177.0);
+    let dt = Second(0.01);
+
+    let tol= Meter(1e-3);
+
+    let h_t = Meter(0.2);
+    let h_h = Meter(1.7);
+    let m = Kilogram(50.0);
+
+    let stdatm = STDATM::new(h_t, h_h, m);
+
+    asunoyozora(t_min, t_max, dt, tol, &stdatm);
+
+}
