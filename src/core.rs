@@ -126,14 +126,28 @@ impl STDATM {
     }
 
 
-    fn analytical_Z(&self, t: Second, base_Z: Meter) -> Meter {
+    pub fn analytical_Z(&self, t: Second, base_Z: Meter) -> Meter {
         let local_k = self.k(base_Z);
+        println!("k: {}", local_k);
         let analytical_z_val = f64::sqrt((local_k * G_0) / self.m.0) * t.0;
-        if analytical_z_val < 710.47586007394392 {
-            Meter((self.m.0 / local_k) * f64::ln(f64::cosh(analytical_z_val)))
-        } else {
-            Meter((self.m.0 / local_k) * (analytical_z_val - f64::ln(2.0)))
+
+        if !analytical_z_val.is_finite() || analytical_z_val.is_nan() || analytical_z_val < 0.0 {
+            println!("[WARN] Invalid analytical_z_val: {}", analytical_z_val);
+            return Meter(0.0);
         }
+
+        // 上限で切る（Wasmでは700超えたらcoshは信用できない）
+        if analytical_z_val > 700.0 {
+            return Meter((self.m.0 / local_k) * (analytical_z_val - f64::ln(2.0)));
+        }
+
+        let cosh_val = f64::cosh(analytical_z_val);
+        if !cosh_val.is_finite() || cosh_val <= 0.0 {
+            println!("[WARN] Invalid cosh: {}", cosh_val);
+            return Meter(0.0);
+        }
+
+        Meter((self.m.0 / local_k) * f64::ln(cosh_val))
     }
 
     fn a(&self, Z: Meter, v: f64) -> f64 {
@@ -154,6 +168,10 @@ impl STDATM {
         let b = self.get_b(H);
         let T = self.T_from_H(H, b);
         let P = self.P_from_H(H, b);
+        println!("H: {}", H.0);
+        println!("b: {}", b);
+        println!("T: {}", T.0);
+        println!("P: {}", P.0);
         self.rho_from_TP(T, P)
     }
 
@@ -187,8 +205,11 @@ impl STDATM {
             return P_b; // 変化なし or 別の処理にする
         }
         let P33a_value = (G_0 * M_0) / (R * L_M_B[b]);
-        Pascal(f64::powf(
-            P_b.0 * ((T_M_B[b].0) / (T_M_B[b].0 + L_M_B[b] * (H.0 - H_I[b - 1].0))),
+        println!("P33a: {}", P33a_value);
+        let base = ((T_M_B[b].0) / (T_M_B[b].0 + L_M_B[b] * (H.0 - H_I[b - 1].0)));
+        println!("base: {}", base);
+        Pascal(P_b.0 * f64::powf(
+            base,
             P33a_value,
         ))
     }
@@ -199,6 +220,7 @@ impl STDATM {
             return P_b; // 変化なし or 別の処理にする
         }
         let P33b_value = (G_0 * M_0) / (R * T_M_B[b].0);
+        println!("P33b: {}", P33b_value);
         Pascal(P_b.0 * f64::exp(-1.0 * P33b_value * (H.0 - H_I[b - 1].0)))
     }
 
@@ -275,39 +297,34 @@ pub fn asunoyozora(t_min: Second, t_max: Second, dt: Second, tol: Meter, stdatm:
 
     for i in 0..MAX_ITERATIONS {
         println!("[Iter {}] low: {:.4}, high: {:.4}, diff: {:.8}", i, low, high, high - low);
-        
-        // 許容誤差に達したらループを抜ける
+
         if high - low < tol.0 {
             println!("Tolerance reached. Exiting loop.");
             break;
         }
         
         let mid = low + (high - low) / 2.0;
-        
-        // midが範囲外、またはNaNやInfinityになった場合の安全装置
+
         if !mid.is_finite() || mid < 0.0 {
             println!("Error: mid is not finite or is negative. Breaking.");
-            // エラーが発生した場合は、とりあえずlowを返すなど、安全な値を設定
-            high = low; // 探索を強制終了させる
+
+            high = low;
             break;
         }
 
         let y0 = Vec2::new([mid, 0.0]);
 
         let history = rk4(vector_ODE, y0, t_min, t_max, dt, &stdatm);
-        
-        // シミュレーション結果が破綻していないかチェック
+
         let final_altitude = match history.last() {
             Some(last_vec) if last_vec.0[0].is_finite() => last_vec.0[0],
             _ => {
-                // 計算が破綻した場合（NaNやInfinityが発生）
                 println!("Warning: Simulation diverged at mid={:.4}. Assuming height is too high.", mid);
-                high = mid; // 高すぎたと仮定して探索範囲を狭める
-                continue;   // 次のループへ
+                high = mid;
+                continue
             }
         };
 
-        // 探索範囲を狭める
         if final_altitude > 0.0 {
             high = mid;
         } else {
@@ -318,11 +335,9 @@ pub fn asunoyozora(t_min: Second, t_max: Second, dt: Second, tol: Meter, stdatm:
     let optimal_initial_altitude = (low + high) / 2.0;
     println!("Final estimated altitude: {:.6} m", optimal_initial_altitude);
 
-    // 見つかった最適解で再度シミュレーションを行い、その履歴を返す
     let final_y0 = Vec2::new([optimal_initial_altitude, 0.0]);
     let final_history = rk4(vector_ODE, final_y0, t_min, t_max, dt, &stdatm);
-    
-    // 最終結果も念のためチェック
+
     if let Some(last_vec) = final_history.last() {
         if !last_vec.0[1].is_finite() {
              println!("FATAL: Final simulation also resulted in non-finite velocity!");
@@ -331,3 +346,23 @@ pub fn asunoyozora(t_min: Second, t_max: Second, dt: Second, tol: Meter, stdatm:
 
     return final_history;
 }
+
+fn main() {
+    let t_min = Second(0.0);
+    let t_max = Second(50.0);
+    let dt = Second(0.01);
+
+    let tol= Meter(0.000001);
+
+    let h_t = Meter(0.1);
+    let h_h = Meter(1.6);
+    let m = Kilogram(60.0);
+    let h_width_rate: f64 = 0.25;
+
+    let stdatm = STDATM::new(h_t, h_h, m, h_width_rate);
+
+    // asunoyozora(t_min, t_max, dt, tol, &stdatm);
+
+    println!("{}", stdatm.analytical_Z(t_max, Meter(20288.15135307835)).0);
+}
+

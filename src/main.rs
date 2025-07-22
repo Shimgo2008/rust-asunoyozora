@@ -15,6 +15,8 @@ fn main() {
 
     let stdatm = STDATM::new(h_t, h_h, m, h_width_rate);
 
-    asunoyozora(t_min, t_max, dt, tol, &stdatm);
+    // asunoyozora(t_min, t_max, dt, tol, &stdatm);
+
+    println!("{}", stdatm.analytical_Z(t_max, Meter(20288.15135307835)).0);
 }
 
