@@ -3,15 +3,15 @@ use core::{STDATM, asunoyozora, Meter, Kilogram, Second};
 
 fn main() {
     let t_min = Second(0.0);
-    let t_max = Second(177.0);
+    let t_max = Second(65.0);
     let dt = Second(0.01);
 
-    let tol= Meter(1e-3);
+    let tol= Meter(0.000001);
 
-    let h_t = Meter(0.2);
-    let h_h = Meter(1.7);
-    let m = Kilogram(50.0);
-    let h_width_rate: f64 = 0.24;
+    let h_t = Meter(0.1);
+    let h_h = Meter(1.6);
+    let m = Kilogram(60.0);
+    let h_width_rate: f64 = 0.25;
 
     let stdatm = STDATM::new(h_t, h_h, m, h_width_rate);
 

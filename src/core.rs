@@ -1,4 +1,4 @@
-use std::{ops::{Add, Div, Mul, Sub}, thread::yield_now};
+use std::{ops::{Add, Div, Mul, Sub}};
 
 #[derive(Clone, Copy)]
 pub struct Meter(pub f64);
@@ -137,7 +137,7 @@ impl STDATM {
     }
 
     fn a(&self, Z: Meter, v: f64) -> f64 {
-        G_0 - (self.k(Z) * v * v) / self.m.0
+        -G_0 - (self.k(Z) * v * v) / self.m.0
     }
 
     fn k(&self, Z: Meter) -> f64 {
@@ -259,39 +259,75 @@ fn vector_ODE(std: &STDATM, y: Vec2) -> Vec2{
 }
 
 #[allow(non_snake_case)]
-pub fn asunoyozora(t_min: Second, t_max: Second, dt: Second, tol: Meter, stdatm: &STDATM) -> Vec<Vec2>{
-
-    let mut y_history: Vec<Vec2> = vec![];
-
-    // 解析解の反復計算（解析解の初期高度推定）
+pub fn asunoyozora(t_min: Second, t_max: Second, dt: Second, tol: Meter, stdatm: &STDATM) -> Vec<Vec2> {
     let mut analytical_Zlist = vec![Meter(0.0)];
     for _ in 0..10 {
         let last = analytical_Zlist.last().unwrap();
         let next = stdatm.analytical_Z(t_max, *last);
+        println!("next: {}, last: {}", next.0, last.0);
         analytical_Zlist.push(next);
     }
 
-    // 二分探索の範囲設定
     let mut low = analytical_Zlist.last().unwrap().0 / 2.0;
     let mut high = analytical_Zlist.last().unwrap().0 * 2.0;
 
-    while high - low > tol.0 {
-        let mid = (low + high) / 2.0;
-        let y0 = Vec2::new([mid, 0.0]); // 初期位置(mid), 初期速度0
+    const MAX_ITERATIONS: i32 = 100;
 
-        // rk4関数を使う
+    for i in 0..MAX_ITERATIONS {
+        println!("[Iter {}] low: {:.4}, high: {:.4}, diff: {:.8}", i, low, high, high - low);
         
-        y_history = rk4(vector_ODE, y0, t_min, t_max, dt, &stdatm);
+        // 許容誤差に達したらループを抜ける
+        if high - low < tol.0 {
+            println!("Tolerance reached. Exiting loop.");
+            break;
+        }
+        
+        let mid = low + (high - low) / 2.0;
+        
+        // midが範囲外、またはNaNやInfinityになった場合の安全装置
+        if !mid.is_finite() || mid < 0.0 {
+            println!("Error: mid is not finite or is negative. Breaking.");
+            // エラーが発生した場合は、とりあえずlowを返すなど、安全な値を設定
+            high = low; // 探索を強制終了させる
+            break;
+        }
 
-        if y_history[y_history.len() - 1].0[0] > 0.0 {
+        let y0 = Vec2::new([mid, 0.0]);
+
+        let history = rk4(vector_ODE, y0, t_min, t_max, dt, &stdatm);
+        
+        // シミュレーション結果が破綻していないかチェック
+        let final_altitude = match history.last() {
+            Some(last_vec) if last_vec.0[0].is_finite() => last_vec.0[0],
+            _ => {
+                // 計算が破綻した場合（NaNやInfinityが発生）
+                println!("Warning: Simulation diverged at mid={:.4}. Assuming height is too high.", mid);
+                high = mid; // 高すぎたと仮定して探索範囲を狭める
+                continue;   // 次のループへ
+            }
+        };
+
+        // 探索範囲を狭める
+        if final_altitude > 0.0 {
             high = mid;
         } else {
             low = mid;
         }
     }
 
-    println!("推定された初期高度: {:.6} m", (low + high) / 2.0);
+    let optimal_initial_altitude = (low + high) / 2.0;
+    println!("Final estimated altitude: {:.6} m", optimal_initial_altitude);
 
-    return y_history;
+    // 見つかった最適解で再度シミュレーションを行い、その履歴を返す
+    let final_y0 = Vec2::new([optimal_initial_altitude, 0.0]);
+    let final_history = rk4(vector_ODE, final_y0, t_min, t_max, dt, &stdatm);
+    
+    // 最終結果も念のためチェック
+    if let Some(last_vec) = final_history.last() {
+        if !last_vec.0[1].is_finite() {
+             println!("FATAL: Final simulation also resulted in non-finite velocity!");
+        }
+    }
 
+    return final_history;
 }

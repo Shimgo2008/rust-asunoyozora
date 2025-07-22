@@ -1,17 +1,22 @@
 mod core;
 
-#[cfg(feature = "python")]
-use pyo3::prelude::*;
-#[cfg(feature = "python")]
-use pyo3::wrap_pyfunction;
-#[cfg(feature = "python")]
-use pyo3::types::PyModule;
-
 use core::{STDATM, asunoyozora, Meter, Kilogram, Second};
+use wasm_bindgen::prelude::*;
+use serde::{Serialize, Deserialize};
 
-#[cfg(feature = "python")]
-#[pyfunction]
-fn py_asunoyozora(
+#[derive(Serialize, Deserialize)]
+pub struct AsunoyozoraResult {
+    pub altitude: f64,
+    pub velocity: f64,
+}
+
+#[wasm_bindgen]
+extern "C" {
+    pub fn alert(s: &str);
+}
+
+#[wasm_bindgen]
+pub fn asunoyozora_wasm(
     t_min: f64,
     t_max: f64,
     dt: f64,
@@ -20,7 +25,7 @@ fn py_asunoyozora(
     h_h: f64,
     m: f64,
     h_width_rate: f64,
-) -> Vec<(f64, f64)> {
+) -> Result<JsValue, JsValue> {
     let stdatm = STDATM::new(
         Meter(h_t),
         Meter(h_h),
@@ -36,12 +41,13 @@ fn py_asunoyozora(
         &stdatm,
     );
 
-    results.into_iter().map(|v| (v.0[0], v.0[1])).collect()
+    let js_results: Vec<AsunoyozoraResult> = results.into_iter().map(|v| AsunoyozoraResult { altitude: v.0[0], velocity: v.0[1] }).collect();
+
+    Ok(serde_wasm_bindgen::to_value(&js_results)?)
 }
 
-#[cfg(feature = "python")]
-#[pymodule]
-fn pyo3_example(m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(py_asunoyozora, m)?)?;
-    Ok(())
-}
+
+// #[pymodule]
+// fn rust_asunoyozora(m: &Bound<'_, PyModule>) -> PyResult<()> {
+//     m.add_function(wrap_pyfunction!(py_asunoyozora, m)?)
+// }
