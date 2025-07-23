@@ -1,5 +1,5 @@
 # source
-https://github.com/Shimgo2008/rosic-asunoyozora/
+https://github.com/Shimgo2008/losic-asunoyozora/
 
 # build command
 build binary
