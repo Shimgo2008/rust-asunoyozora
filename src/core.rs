@@ -133,25 +133,25 @@ impl STDATM {
 
         if !analytical_z_val.is_finite() || analytical_z_val.is_nan() || analytical_z_val < 0.0 {
             println!("[WARN] Invalid analytical_z_val: {}", analytical_z_val);
-            return Meter(0.0);
+             Meter(0.0);
         }
 
         // 上限で切る（Wasmでは700超えたらcoshは信用できない）
         if analytical_z_val > 700.0 {
-            return Meter((self.m.0 / local_k) * (analytical_z_val - f64::ln(2.0)));
+             Meter((self.m.0 / local_k) * (analytical_z_val - f64::ln(2.0)));
         }
 
         let cosh_val = f64::cosh(analytical_z_val);
         if !cosh_val.is_finite() || cosh_val <= 0.0 {
             println!("[WARN] Invalid cosh: {}", cosh_val);
-            return Meter(0.0);
+            Meter(0.0);
         }
 
         Meter((self.m.0 / local_k) * f64::ln(cosh_val))
     }
 
     fn a(&self, Z: Meter, v: f64) -> f64 {
-        -G_0 - (self.k(Z) * v * v) / self.m.0
+        -G_0 - (self.k(Z) * v.abs() * v) / self.m.0
     }
 
     fn k(&self, Z: Meter) -> f64 {
@@ -164,21 +164,37 @@ impl STDATM {
 
     /// 最適化後：Z → H, b を1回だけ求める
     fn rho(&self, Z: Meter) -> f64 {
-        let H = self.Z2H(Z);
+        let mut H = self.Z2H(Z);
+
+        if H.0 < 0.0 {
+            H = GPMeter(0.0);
+        }
+
         let b = self.get_b(H);
         let T = self.T_from_H(H, b);
         let P = self.P_from_H(H, b);
-        println!("H: {}", H.0);
-        println!("b: {}", b);
-        println!("T: {}", T.0);
-        println!("P: {}", P.0);
+        // NaNだったら0返す
+        if T.0.is_nan() {
+            println!("[WARN] T is NaN");
+            println!("H: {}", H.0);
+            println!("b: {}", b);
+            println!("T: {}", T.0);
+            println!("P: {}", P.0);
+        }
+        if H.0 < GPMeter(-2000.0).0 {
+            print!("[WARN] H is non-positive: {}", H.0);
+            println!("H: {}", H.0);
+            println!("b: {}", b);
+            println!("T: {}", T.0);
+            println!("P: {}", P.0);
+        }
         self.rho_from_TP(T, P)
     }
 
     /// Hとbが既知のときの温度
     fn T_from_H(&self, H: GPMeter, b: usize) -> Kelvin {
         if b == 0 {
-            return T_M_B[0];  // もしくは定数返すなど
+            T_M_B[0];  // もしくは定数返すなど
         }
         let rate = L_M_B[b];
         let remainder_kilometer = (H.0 - H_I[b - 1].0) / 1000.0;
@@ -202,10 +218,10 @@ impl STDATM {
     /// 最適化後：bを引数で受け取る（P_33a用）
     fn P_33a(&self, H: GPMeter, b: usize, P_b: Pascal) -> Pascal {
         if b == 0 {
-            return P_b; // 変化なし or 別の処理にする
+            P_b; // 変化なし or 別の処理にする
         }
         let P33a_value = (G_0 * M_0) / (R * L_M_B[b]);
-        println!("P33a: {}", P33a_value);
+        // println!("P33a: {}", P33a_value);
         let base = ((T_M_B[b].0) / (T_M_B[b].0 + L_M_B[b] * (H.0 - H_I[b - 1].0)));
         println!("base: {}", base);
         Pascal(P_b.0 * f64::powf(
@@ -217,21 +233,21 @@ impl STDATM {
     /// 最適化後：bを引数で受け取る（P_33b用）
     fn P_33b(&self, H: GPMeter, b: usize, P_b: Pascal) -> Pascal {
         if b == 0 {
-            return P_b; // 変化なし or 別の処理にする
+            P_b; // 変化なし or 別の処理にする
         }
         let P33b_value = (G_0 * M_0) / (R * T_M_B[b].0);
-        println!("P33b: {}", P33b_value);
+        // println!("P33b: {}", P33b_value);
         Pascal(P_b.0 * f64::exp(-1.0 * P33b_value * (H.0 - H_I[b - 1].0)))
     }
 
     /// b値の取得（Z2Hを省略するため引数はGPMeter）
     fn get_b(&self, H: GPMeter) -> usize {
         if H.0 == 0.0 {
-            return 0;
+            0;
         }
         for i in 1..(SA_LENGTH - 1) {
             if H_I[i].0 <= H.0 && H.0 < H_I[i + 1].0 {
-                return i;
+                i;
             }
         }
         SA_LENGTH - 1
@@ -248,6 +264,7 @@ fn rk4<F>(f: F,
     t1: Second,
     dt: Second,
     stdatm: &STDATM,
+    is_history: bool,
 ) -> Vec<Vec2>
 where
     F: Fn(&STDATM, Vec2) -> Vec2
@@ -255,7 +272,9 @@ where
     let steps = ((t1.0 - t0.0) / dt.0) as usize;
     let mut results = Vec::with_capacity((steps + 1) / 2);
     let mut y: Vec2 = y0;
-    results.push(y0);
+    if is_history {
+        results.push(y0);
+    }
 
     for step in 1..steps{
         let k1: Vec2 = f(stdatm, y);
@@ -263,9 +282,13 @@ where
         let k3: Vec2 = f(stdatm, y + k2 * (dt.0 / 2.0));
         let k4: Vec2 = f(stdatm, y + k3 * dt.0);
         y = y + ((k1 + k2 * 2.0 + k3 * 2.0 + k4) * (dt.0 / 6.0));
-        if step % 2 == 0 {
+        if step % 2 == 0 && is_history {
             results.push(y);
         }
+    }
+
+    if !is_history {
+        results.push(y);
     }
 
     return results;
@@ -314,9 +337,7 @@ pub fn asunoyozora(t_min: Second, t_max: Second, dt: Second, tol: Meter, stdatm:
 
         let y0 = Vec2::new([mid, 0.0]);
 
-        let history = rk4(vector_ODE, y0, t_min, t_max, dt, &stdatm);
-
-        let final_altitude = match history.last() {
+        let final_altitude = match rk4(vector_ODE, y0, t_min, t_max, dt, &stdatm, false).last() {
             Some(last_vec) if last_vec.0[0].is_finite() => last_vec.0[0],
             _ => {
                 println!("Warning: Simulation diverged at mid={:.4}. Assuming height is too high.", mid);
@@ -336,7 +357,7 @@ pub fn asunoyozora(t_min: Second, t_max: Second, dt: Second, tol: Meter, stdatm:
     println!("Final estimated altitude: {:.6} m", optimal_initial_altitude);
 
     let final_y0 = Vec2::new([optimal_initial_altitude, 0.0]);
-    let final_history = rk4(vector_ODE, final_y0, t_min, t_max, dt, &stdatm);
+    let final_history = rk4(vector_ODE, final_y0, t_min, t_max, dt, &stdatm, true);
 
     if let Some(last_vec) = final_history.last() {
         if !last_vec.0[1].is_finite() {
@@ -344,12 +365,15 @@ pub fn asunoyozora(t_min: Second, t_max: Second, dt: Second, tol: Meter, stdatm:
         }
     }
 
+    println!("{}", final_history[0].0[0]);
     return final_history;
 }
 
+// for debug
+#[allow(dead_code)]
 fn main() {
     let t_min = Second(0.0);
-    let t_max = Second(50.0);
+    let t_max = Second(62.49);
     let dt = Second(0.01);
 
     let tol= Meter(0.000001);
@@ -361,8 +385,8 @@ fn main() {
 
     let stdatm = STDATM::new(h_t, h_h, m, h_width_rate);
 
-    // asunoyozora(t_min, t_max, dt, tol, &stdatm);
+    asunoyozora(t_min, t_max, dt, tol, &stdatm);
 
-    println!("{}", stdatm.analytical_Z(t_max, Meter(20288.15135307835)).0);
+    // println!("{}", stdatm.analytical_Z(t_max, Meter(20288.15135307835)).0);
 }
 

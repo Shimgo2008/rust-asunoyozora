@@ -14,3 +14,5 @@ source .venv/bin/activate
 pip install -r requirement.txt
 maturin build
 ```
+
+QSLとは量子コンピューティングのために用いられる、演繹的推論のスケーラビリティを達成するのに有効的であると提案された手法である。
