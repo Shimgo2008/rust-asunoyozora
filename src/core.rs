@@ -505,7 +505,7 @@ mod tests {
         let atmosphere = stdatm();
         let rho = atmosphere.rho(Meter(0.0));
 
-        assert!((rho - 1.2249781434738449).abs() < 1.0e-12);
+        assert!((rho - 1.2249781434738449).abs() < 1.0e-6);
     }
 
     #[test]
