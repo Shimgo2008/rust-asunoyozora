@@ -1,4 +1,4 @@
-use std::{ops::{Add, Div, Mul, Sub}};
+use std::ops::{Add, Div, Mul, Sub};
 
 #[derive(Clone, Copy)]
 pub struct Meter(pub f64);
@@ -20,7 +20,6 @@ struct SquareMeter(pub f64);
 
 #[derive(Clone, Copy)]
 pub struct Vec2(pub [f64; 2]);
-
 
 impl Meter {
     pub const fn new(v: f64) -> Self {
@@ -53,11 +52,10 @@ impl Second {
     }
 }
 impl Vec2 {
-    pub const fn new(v: [f64; 2]) -> Self{
+    pub const fn new(v: [f64; 2]) -> Self {
         Self(v)
     }
 }
-
 
 impl From<f64> for Second {
     fn from(value: f64) -> Self {
@@ -102,15 +100,51 @@ impl Div for Vec2 {
 }
 
 const SA_LENGTH: usize = 8;
-const R: f64 = 8.314462618e+3;      // CODATA
-const G_0: f64 = 9.80665;           // CODATA
-const M_0: f64 = 28.9644;           // CODATA
-const C_D: f64 = 1.0;               // TODO: 難しいから定数 1である妥当性はない
+const R: f64 = 8.314462618e+3; // CODATA
+const G_0: f64 = 9.80665; // CODATA
+const M_0: f64 = 28.9644; // CODATA
+const C_D: f64 = 1.0; // TODO: 難しいから定数 1である妥当性はない
 const R_0: Meter = Meter(6356.766e3);
-const H_I: [GPMeter; SA_LENGTH] = [GPMeter(0.0 * 1000.0), GPMeter(11.0 * 1000.0), GPMeter(20.0 * 1000.0), GPMeter(32.0 * 1000.0), GPMeter(47.0 * 1000.0), GPMeter(51.0 * 1000.0), GPMeter(71.0 * 1000.0), GPMeter(84.852 * 1000.0)];
-const P_B: [Pascal; SA_LENGTH] = [Pascal(101325.0), Pascal(17881.924167776844), Pascal(4451.782721266618), Pascal(835.676386546647), Pascal(125.823085025137), Pascal(75.131157658166), Pascal(2.218089806735), Pascal(0.010142033211)];
-const T_M_B: [Kelvin; SA_LENGTH] = [Kelvin(288.15), Kelvin(216.65), Kelvin(216.65), Kelvin(228.65), Kelvin(270.65), Kelvin(270.65), Kelvin(214.65), Kelvin(186.95)];
-const L_M_B: [f64; SA_LENGTH] = [-6.5 / 1000.0, 0.0 / 1000.0, 1.0 / 1000.0, 2.8 / 1000.0, 0.0 / 1000.0, -2.8 / 1000.0, -2.0 / 1000.0, 0.0 / 1000.0];
+const H_I: [GPMeter; SA_LENGTH] = [
+    GPMeter(0.0 * 1000.0),
+    GPMeter(11.0 * 1000.0),
+    GPMeter(20.0 * 1000.0),
+    GPMeter(32.0 * 1000.0),
+    GPMeter(47.0 * 1000.0),
+    GPMeter(51.0 * 1000.0),
+    GPMeter(71.0 * 1000.0),
+    GPMeter(84.852 * 1000.0),
+];
+const P_B: [Pascal; SA_LENGTH] = [
+    Pascal(101325.0),
+    Pascal(22632.645891130254),
+    Pascal(5475.162723334922),
+    Pascal(868.0895580343575),
+    Pascal(110.91927557768723),
+    Pascal(66.94728114099739),
+    Pascal(3.9571093634086405),
+    Pascal(0.37346372866865546),
+];
+const T_M_B: [Kelvin; SA_LENGTH] = [
+    Kelvin(288.15),
+    Kelvin(216.65),
+    Kelvin(216.65),
+    Kelvin(228.65),
+    Kelvin(270.65),
+    Kelvin(270.65),
+    Kelvin(214.65),
+    Kelvin(186.95),
+];
+const L_M_B: [f64; SA_LENGTH] = [
+    -6.5 / 1000.0,
+    0.0 / 1000.0,
+    1.0 / 1000.0,
+    2.8 / 1000.0,
+    0.0 / 1000.0,
+    -2.8 / 1000.0,
+    -2.0 / 1000.0,
+    0.0 / 1000.0,
+];
 
 pub struct STDATM {
     h_t: Meter,
@@ -122,13 +156,16 @@ pub struct STDATM {
 #[allow(non_snake_case)]
 impl STDATM {
     pub const fn new(h_t: Meter, h_h: Meter, m: Kilogram, h_width_rate: f64) -> Self {
-        Self { h_t, h_h, m, h_width_rate }
+        Self {
+            h_t,
+            h_h,
+            m,
+            h_width_rate,
+        }
     }
-
 
     pub fn analytical_Z(&self, t: Second, base_Z: Meter) -> Meter {
         let local_k = self.k(base_Z);
-        println!("k: {}", local_k);
         let analytical_z_val = f64::sqrt((local_k * G_0) / self.m.0) * t.0;
 
         if !analytical_z_val.is_finite() || analytical_z_val.is_nan() || analytical_z_val < 0.0 {
@@ -151,7 +188,12 @@ impl STDATM {
     }
 
     fn a(&self, Z: Meter, v: f64) -> f64 {
-        -G_0 - (self.k(Z) * v * v) / self.m.0
+        -self.g(Z) - (self.k(Z) * v.abs() * v) / self.m.0
+    }
+
+    fn g(&self, Z: Meter) -> f64 {
+        let z = Z.0.max(0.0);
+        G_0 * (R_0.0 / (R_0.0 + z)).powi(2)
     }
 
     fn k(&self, Z: Meter) -> f64 {
@@ -164,34 +206,43 @@ impl STDATM {
 
     /// 最適化後：Z → H, b を1回だけ求める
     fn rho(&self, Z: Meter) -> f64 {
-        let H = self.Z2H(Z);
+        let H = self.Z2H(Meter(Z.0.max(0.0)));
         let b = self.get_b(H);
         let T = self.T_from_H(H, b);
         let P = self.P_from_H(H, b);
-        println!("H: {}", H.0);
-        println!("b: {}", b);
-        println!("T: {}", T.0);
-        println!("P: {}", P.0);
-        self.rho_from_TP(T, P)
+        let rho = self.rho_from_TP(T, P);
+
+        assert!(
+            rho.is_finite() && rho > 0.0,
+            "invalid atmosphere: H={}, b={}, T={}, P={}, rho={}",
+            H.0,
+            b,
+            T.0,
+            P.0,
+            rho
+        );
+
+        rho
     }
 
     /// Hとbが既知のときの温度
     fn T_from_H(&self, H: GPMeter, b: usize) -> Kelvin {
-        if b == 0 {
-            return T_M_B[0];  // もしくは定数返すなど
-        }
-        let rate = L_M_B[b];
-        let remainder_kilometer = (H.0 - H_I[b - 1].0) / 1000.0;
-        Kelvin(T_M_B[b - 1].0 + remainder_kilometer * rate)
+        let dh = H.0 - H_I[b].0;
+        Kelvin(T_M_B[b].0 + L_M_B[b] * dh)
     }
 
     /// Hとbが既知のときの気圧
     fn P_from_H(&self, H: GPMeter, b: usize) -> Pascal {
-        let P_b = P_B[b];
-        if L_M_B[b] == 0.0 {
-            self.P_33b(H, b, P_b)
+        let p_b = P_B[b].0;
+        let t_b = T_M_B[b].0;
+        let lapse = L_M_B[b];
+        let dh = H.0 - H_I[b].0;
+
+        if lapse.abs() < f64::EPSILON {
+            Pascal(p_b * (-(G_0 * M_0 * dh) / (R * t_b)).exp())
         } else {
-            self.P_33a(H, b, P_b)
+            let t = t_b + lapse * dh;
+            Pascal(p_b * (t_b / t).powf((G_0 * M_0) / (R * lapse)))
         }
     }
 
@@ -199,80 +250,91 @@ impl STDATM {
         (P.0 * M_0) / (R * T.0)
     }
 
-    /// 最適化後：bを引数で受け取る（P_33a用）
-    fn P_33a(&self, H: GPMeter, b: usize, P_b: Pascal) -> Pascal {
-        if b == 0 {
-            return P_b; // 変化なし or 別の処理にする
-        }
-        let P33a_value = (G_0 * M_0) / (R * L_M_B[b]);
-        println!("P33a: {}", P33a_value);
-        let base = ((T_M_B[b].0) / (T_M_B[b].0 + L_M_B[b] * (H.0 - H_I[b - 1].0)));
-        println!("base: {}", base);
-        Pascal(P_b.0 * f64::powf(
-            base,
-            P33a_value,
-        ))
-    }
-
-    /// 最適化後：bを引数で受け取る（P_33b用）
-    fn P_33b(&self, H: GPMeter, b: usize, P_b: Pascal) -> Pascal {
-        if b == 0 {
-            return P_b; // 変化なし or 別の処理にする
-        }
-        let P33b_value = (G_0 * M_0) / (R * T_M_B[b].0);
-        println!("P33b: {}", P33b_value);
-        Pascal(P_b.0 * f64::exp(-1.0 * P33b_value * (H.0 - H_I[b - 1].0)))
-    }
-
     /// b値の取得（Z2Hを省略するため引数はGPMeter）
     fn get_b(&self, H: GPMeter) -> usize {
-        if H.0 == 0.0 {
+        assert!(
+            H.0 <= H_I[SA_LENGTH - 1].0 + 1.0e-9,
+            "geopotential height {} m exceeds model limit {} m",
+            H.0,
+            H_I[SA_LENGTH - 1].0
+        );
+
+        if H.0 <= H_I[0].0 {
             return 0;
         }
-        for i in 1..(SA_LENGTH - 1) {
-            if H_I[i].0 <= H.0 && H.0 < H_I[i + 1].0 {
-                return i;
+
+        for b in 0..(SA_LENGTH - 1) {
+            if H.0 < H_I[b + 1].0 {
+                return b;
             }
         }
+
         SA_LENGTH - 1
     }
 
     fn Z2H(&self, Z: Meter) -> GPMeter {
         GPMeter((R_0.0 * Z.0) / (R_0.0 + Z.0))
     }
+
+    fn H2Z(&self, H: GPMeter) -> Meter {
+        Meter((R_0.0 * H.0) / (R_0.0 - H.0))
+    }
+
+    fn max_model_Z(&self) -> Meter {
+        self.H2Z(H_I[SA_LENGTH - 1])
+    }
 }
 
-fn rk4<F>(f: F,
+fn rk4<F>(
+    f: F,
     y0: Vec2,
     t0: Second,
     t1: Second,
     dt: Second,
     stdatm: &STDATM,
+    is_history: bool,
 ) -> Vec<Vec2>
 where
-    F: Fn(&STDATM, Vec2) -> Vec2
+    F: Fn(&STDATM, Vec2) -> Vec2,
 {
-    let steps = ((t1.0 - t0.0) / dt.0) as usize;
-    let mut results = Vec::with_capacity((steps + 1) / 2);
-    let mut y: Vec2 = y0;
-    results.push(y0);
+    assert!(dt.0 > 0.0);
+    assert!(t1.0 >= t0.0);
 
-    for step in 1..steps{
+    let mut results = Vec::new();
+    let mut y: Vec2 = y0;
+    let mut t = t0.0;
+    let mut step = 0usize;
+
+    if is_history {
+        results.push(y0);
+    }
+
+    while t < t1.0 {
+        let h = dt.0.min(t1.0 - t);
+
         let k1: Vec2 = f(stdatm, y);
-        let k2: Vec2 = f(stdatm, y + k1 * (dt.0 / 2.0));
-        let k3: Vec2 = f(stdatm, y + k2 * (dt.0 / 2.0));
-        let k4: Vec2 = f(stdatm, y + k3 * dt.0);
-        y = y + ((k1 + k2 * 2.0 + k3 * 2.0 + k4) * (dt.0 / 6.0));
-        if step % 2 == 0 {
+        let k2: Vec2 = f(stdatm, y + k1 * (h / 2.0));
+        let k3: Vec2 = f(stdatm, y + k2 * (h / 2.0));
+        let k4: Vec2 = f(stdatm, y + k3 * h);
+
+        y = y + ((k1 + k2 * 2.0 + k3 * 2.0 + k4) * (h / 6.0));
+        t += h;
+        step += 1;
+
+        if is_history && (step % 2 == 0 || t >= t1.0) {
             results.push(y);
         }
+    }
+
+    if !is_history {
+        results.push(y);
     }
 
     return results;
 }
 
 #[allow(non_snake_case)]
-fn vector_ODE(std: &STDATM, y: Vec2) -> Vec2{
+fn vector_ODE(std: &STDATM, y: Vec2) -> Vec2 {
     let Z = Meter(y.0[0]);
     let v = y.0[1];
     let dZ_dt = v;
@@ -280,29 +342,101 @@ fn vector_ODE(std: &STDATM, y: Vec2) -> Vec2{
     return Vec2([dZ_dt, dv_dt]);
 }
 
-#[allow(non_snake_case)]
-pub fn asunoyozora(t_min: Second, t_max: Second, dt: Second, tol: Meter, stdatm: &STDATM) -> Vec<Vec2> {
-    let mut analytical_Zlist = vec![Meter(0.0)];
-    for _ in 0..10 {
-        let last = analytical_Zlist.last().unwrap();
-        let next = stdatm.analytical_Z(t_max, *last);
-        println!("next: {}, last: {}", next.0, last.0);
-        analytical_Zlist.push(next);
+fn final_altitude(z0: f64, t_min: Second, t_max: Second, dt: Second, stdatm: &STDATM) -> f64 {
+    assert!(z0 >= 0.0, "initial altitude must be non-negative: {}", z0);
+    assert!(
+        z0 <= stdatm.max_model_Z().0,
+        "initial altitude {} m exceeds atmosphere model limit {} m",
+        z0,
+        stdatm.max_model_Z().0
+    );
+
+    let y0 = Vec2::new([z0, 0.0]);
+    let z = rk4(vector_ODE, y0, t_min, t_max, dt, stdatm, false)
+        .last()
+        .expect("RK4 returned no result")
+        .0[0];
+
+    assert!(z.is_finite(), "final altitude is not finite: {}", z);
+    z
+}
+
+fn bracket_initial_altitude(
+    t_min: Second,
+    t_max: Second,
+    dt: Second,
+    stdatm: &STDATM,
+) -> (f64, f64) {
+    let model_limit = stdatm.max_model_Z().0;
+    let low = 0.0;
+    let f_low = final_altitude(low, t_min, t_max, dt, stdatm);
+
+    let mut high = stdatm.analytical_Z(t_max, Meter(0.0)).0;
+    if !high.is_finite() || high <= 0.0 {
+        high = 1.0;
+    }
+    high = high.min(model_limit);
+
+    let mut f_high = final_altitude(high, t_min, t_max, dt, stdatm);
+
+    const MAX_BRACKET_ITERATIONS: usize = 64;
+
+    for _ in 0..MAX_BRACKET_ITERATIONS {
+        if f_low <= 0.0 && f_high >= 0.0 {
+            return (low, high);
+        }
+
+        if f_low > 0.0 {
+            break;
+        }
+
+        if high >= model_limit {
+            break;
+        }
+
+        high = (high * 2.0).min(model_limit);
+        f_high = final_altitude(high, t_min, t_max, dt, stdatm);
     }
 
-    let mut low = analytical_Zlist.last().unwrap().0 / 2.0;
-    let mut high = analytical_Zlist.last().unwrap().0 * 2.0;
+    assert!(
+        f_low <= 0.0 && f_high >= 0.0,
+        "failed to bracket root within atmosphere model: low={}, f(low)={}, high={}, f(high)={}, model_limit={}",
+        low,
+        f_low,
+        high,
+        f_high,
+        model_limit
+    );
+
+    (low, high)
+}
+
+#[allow(non_snake_case)]
+pub fn asunoyozora(
+    t_min: Second,
+    t_max: Second,
+    dt: Second,
+    tol: Meter,
+    stdatm: &STDATM,
+) -> Vec<Vec2> {
+    let (mut low, mut high) = bracket_initial_altitude(t_min, t_max, dt, stdatm);
 
     const MAX_ITERATIONS: i32 = 100;
 
     for i in 0..MAX_ITERATIONS {
-        println!("[Iter {}] low: {:.4}, high: {:.4}, diff: {:.8}", i, low, high, high - low);
+        println!(
+            "[Iter {}] low: {:.4}, high: {:.4}, diff: {:.8}",
+            i,
+            low,
+            high,
+            high - low
+        );
 
         if high - low < tol.0 {
             println!("Tolerance reached. Exiting loop.");
             break;
         }
-        
+
         let mid = low + (high - low) / 2.0;
 
         if !mid.is_finite() || mid < 0.0 {
@@ -312,20 +446,9 @@ pub fn asunoyozora(t_min: Second, t_max: Second, dt: Second, tol: Meter, stdatm:
             break;
         }
 
-        let y0 = Vec2::new([mid, 0.0]);
+        let f_mid = final_altitude(mid, t_min, t_max, dt, stdatm);
 
-        let history = rk4(vector_ODE, y0, t_min, t_max, dt, &stdatm);
-
-        let final_altitude = match history.last() {
-            Some(last_vec) if last_vec.0[0].is_finite() => last_vec.0[0],
-            _ => {
-                println!("Warning: Simulation diverged at mid={:.4}. Assuming height is too high.", mid);
-                high = mid;
-                continue
-            }
-        };
-
-        if final_altitude > 0.0 {
+        if f_mid > 0.0 {
             high = mid;
         } else {
             low = mid;
@@ -333,26 +456,91 @@ pub fn asunoyozora(t_min: Second, t_max: Second, dt: Second, tol: Meter, stdatm:
     }
 
     let optimal_initial_altitude = (low + high) / 2.0;
-    println!("Final estimated altitude: {:.6} m", optimal_initial_altitude);
+    println!(
+        "Final estimated altitude: {:.6} m",
+        optimal_initial_altitude
+    );
 
     let final_y0 = Vec2::new([optimal_initial_altitude, 0.0]);
-    let final_history = rk4(vector_ODE, final_y0, t_min, t_max, dt, &stdatm);
+    let final_history = rk4(vector_ODE, final_y0, t_min, t_max, dt, &stdatm, true);
 
     if let Some(last_vec) = final_history.last() {
         if !last_vec.0[1].is_finite() {
-             println!("FATAL: Final simulation also resulted in non-finite velocity!");
+            println!("FATAL: Final simulation also resulted in non-finite velocity!");
         }
     }
 
+    println!("{}", final_history[0].0[0]);
     return final_history;
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stdatm() -> STDATM {
+        STDATM::new(Meter(0.45), Meter(1.612), Kilogram(60.0), 0.23)
+    }
+
+    #[test]
+    fn get_b_selects_standard_atmosphere_layer() {
+        let atmosphere = stdatm();
+
+        assert_eq!(atmosphere.get_b(GPMeter(-1.0)), 0);
+        assert_eq!(atmosphere.get_b(GPMeter(0.0)), 0);
+        assert_eq!(atmosphere.get_b(GPMeter(10_999.0)), 0);
+        assert_eq!(atmosphere.get_b(GPMeter(11_000.0)), 1);
+        assert_eq!(atmosphere.get_b(GPMeter(20_000.0)), 2);
+        assert_eq!(atmosphere.get_b(H_I[SA_LENGTH - 1]), 7);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds model limit")]
+    fn get_b_rejects_height_above_model_limit() {
+        stdatm().get_b(GPMeter(90_000.0));
+    }
+
+    #[test]
+    fn rho_uses_sea_level_standard_atmosphere() {
+        let atmosphere = stdatm();
+        let rho = atmosphere.rho(Meter(0.0));
+
+        assert!((rho - 1.2249781434738449).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn pressure_matches_layer_base_values() {
+        let atmosphere = stdatm();
+
+        for b in 0..SA_LENGTH {
+            let p = atmosphere.P_from_H(H_I[b], b);
+            assert!((p.0 - P_B[b].0).abs() < 1.0e-9);
+        }
+    }
+
+    #[test]
+    fn bracket_initial_altitude_checks_final_altitude_signs() {
+        let atmosphere = stdatm();
+        let t_min = Second(0.0);
+        let t_max = Second(177.0);
+        let dt = Second(0.05);
+
+        let (low, high) = bracket_initial_altitude(t_min, t_max, dt, &atmosphere);
+
+        assert!(final_altitude(low, t_min, t_max, dt, &atmosphere) <= 0.0);
+        assert!(final_altitude(high, t_min, t_max, dt, &atmosphere) >= 0.0);
+        assert!(high <= atmosphere.max_model_Z().0);
+    }
+}
+
+// for debug
+#[allow(dead_code)]
 fn main() {
     let t_min = Second(0.0);
-    let t_max = Second(50.0);
+    let t_max = Second(62.49);
     let dt = Second(0.01);
 
-    let tol= Meter(0.000001);
+    let tol = Meter(0.000001);
 
     let h_t = Meter(0.1);
     let h_h = Meter(1.6);
@@ -361,8 +549,7 @@ fn main() {
 
     let stdatm = STDATM::new(h_t, h_h, m, h_width_rate);
 
-    // asunoyozora(t_min, t_max, dt, tol, &stdatm);
+    asunoyozora(t_min, t_max, dt, tol, &stdatm);
 
-    println!("{}", stdatm.analytical_Z(t_max, Meter(20288.15135307835)).0);
+    // println!("{}", stdatm.analytical_Z(t_max, Meter(20288.15135307835)).0);
 }
-
